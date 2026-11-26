@@ -131,11 +131,6 @@ The forecast demonstrates how historical sales data can be used to support deman
 
 ![Sales Dashboard](outputs/yearly_sales.png)
 
-### 📊Sales  Dashboard
-
-![Sales Dashboard](outputs/sales_dashboard.png)
-
-
 ### 📊 Retail Sales Dashboard
 
 ![Sales Dashboard](outputs/sales_dashboard.png)
