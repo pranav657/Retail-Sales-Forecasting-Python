@@ -1,0 +1,8 @@
+PROJECT SUMMARY
+Best average sales weekday: Sunday (1558.14)
+Lowest average sales weekday: Thursday (1138.80)
+Best average sales month number: 4 (1426.14)
+Lowest average sales month number: 9 (1101.85)
+Selected model based on rolling test MAE: Random Forest
+Forecast total sales next 30 days: 46614.14
+Forecast average daily sales next 30 days: 1553.80
