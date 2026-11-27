@@ -69,56 +69,72 @@ h1, h2, h3 {
 
 
 # ==========================================
-# 3. LOAD DATA
+# 3. UPLOAD DATA FIRST — NO DEFAULT DATASET
 # ==========================================
 
-@st.cache_data
-def load_data():
+st.title("📈 Retail Sales Analytics Dashboard")
+st.markdown("Upload your own CSV or Excel file to explore its historical performance and generate forecasts.")
 
-    if not HISTORY_FILE.exists():
-        raise FileNotFoundError(
-            "cleaned_retail_sales.csv not found in outputs folder"
-        )
+uploaded_file = st.file_uploader(
+    "📂 Upload your sales dataset (CSV or Excel)",
+    type=["csv", "xlsx"],
+    key="custom_tab_dataset_upload"
+)
 
-    if not FORECAST_FILE.exists():
-        raise FileNotFoundError(
-            "retail_sales_forecast_30_days.csv not found in outputs folder"
-        )
-
-    history = pd.read_csv(HISTORY_FILE)
-    forecast = pd.read_csv(FORECAST_FILE)
-
-    history["Date"] = pd.to_datetime(history["Date"])
-    forecast["Date"] = pd.to_datetime(forecast["Date"])
-
-    history["Sales"] = pd.to_numeric(
-        history["Sales"], errors="coerce"
-    )
-
-    forecast["Forecasted_Sales"] = pd.to_numeric(
-        forecast["Forecasted_Sales"], errors="coerce"
-    )
-
-    history = history.dropna(subset=["Date", "Sales"])
-    forecast = forecast.dropna(
-        subset=["Date", "Forecasted_Sales"]
-    )
-
-    return history, forecast
-
+if uploaded_file is None:
+    st.info("👆 Please upload a CSV or Excel file to display your dashboard. No sample or default historical data is shown.")
+    st.stop()
 
 try:
-    history, forecast = load_data()
-
-except Exception as error:
-    st.error("Unable to load project data.")
-    st.exception(error)
+    uploaded_file.seek(0)
+    if uploaded_file.name.lower().endswith(".csv"):
+        uploaded_data = pd.read_csv(uploaded_file)
+    else:
+        uploaded_data = pd.read_excel(uploaded_file)
+except Exception as upload_error:
+    st.error(f"Unable to read the uploaded file: {upload_error}")
     st.stop()
 
-
-if history.empty or forecast.empty:
-    st.error("Your historical or forecast dataset is empty.")
+if uploaded_data.empty:
+    st.error("The uploaded file is empty. Please upload a file containing data.")
     st.stop()
+
+# Detect likely date and numeric columns. The Upload & Predict tab lets the
+# user change these selections; Historical Analysis follows those selections.
+date_candidates = []
+for col in uploaded_data.columns:
+    parsed_dates = pd.to_datetime(uploaded_data[col], errors="coerce")
+    if parsed_dates.notna().sum() >= max(2, int(len(uploaded_data) * 0.5)):
+        date_candidates.append(col)
+numeric_candidates = [
+    col for col in uploaded_data.columns
+    if pd.to_numeric(uploaded_data[col], errors="coerce").notna().any()
+]
+
+saved_date_col = st.session_state.get("custom_date_column")
+saved_target_col = st.session_state.get("custom_target_column")
+selected_date_col = saved_date_col if saved_date_col in uploaded_data.columns else (date_candidates[0] if date_candidates else None)
+selected_target_col = saved_target_col if saved_target_col in numeric_candidates else next(
+    (col for col in numeric_candidates if col != selected_date_col), None
+)
+
+if selected_date_col is None or selected_target_col is None:
+    st.error("I couldn't identify both a date column and a numeric sales/value column. Please check your file has these columns.")
+    st.write("Available columns:", list(uploaded_data.columns))
+    st.stop()
+
+active_history = uploaded_data[[selected_date_col, selected_target_col]].copy()
+active_history["Date"] = pd.to_datetime(active_history[selected_date_col], errors="coerce")
+active_history["Sales"] = pd.to_numeric(active_history[selected_target_col], errors="coerce")
+active_history = active_history.dropna(subset=["Date", "Sales"])
+active_history = (active_history.groupby("Date", as_index=False)["Sales"]
+                  .sum().sort_values("Date"))
+
+if active_history.empty:
+    st.error("The selected columns do not contain valid date and numeric values.")
+    st.stop()
+
+historical_source_label = f"Uploaded file: {uploaded_file.name}"
 
 
 # ==========================================
@@ -296,8 +312,8 @@ st.sidebar.markdown("---")
 
 st.sidebar.subheader("Historical Date Filter")
 
-min_date = history["Date"].min().date()
-max_date = history["Date"].max().date()
+min_date = active_history["Date"].min().date()
+max_date = active_history["Date"].max().date()
 
 selected_dates = st.sidebar.date_input(
     "Select date range",
@@ -318,9 +334,7 @@ forecast_days = st.sidebar.select_slider(
 
 st.sidebar.markdown("---")
 
-st.sidebar.info(
-    "This project uses simulated retail sales data."
-)
+st.sidebar.info(f"Using uploaded file: {uploaded_file.name}")
 
 
 
@@ -332,23 +346,17 @@ if isinstance(selected_dates, (tuple, list)) and len(selected_dates) == 2:
 
     start_date, end_date = selected_dates
 
-    filtered = history[
-        (history["Date"].dt.date >= start_date) &
-        (history["Date"].dt.date <= end_date)
+    filtered = active_history[
+        (active_history["Date"].dt.date >= start_date) &
+        (active_history["Date"].dt.date <= end_date)
     ].copy()
 
 else:
-    filtered = history.copy()
+    filtered = active_history.copy()
 
-
-forecast_filtered = forecast.head(forecast_days).copy()
 
 if filtered.empty:
     st.warning("No historical sales found for this date range.")
-    st.stop()
-
-if forecast_filtered.empty:
-    st.warning("No forecast data is available.")
     st.stop()
 
 
@@ -356,14 +364,8 @@ if forecast_filtered.empty:
 # 6. DASHBOARD HEADER
 # ==========================================
 
-st.title("📈 Retail Sales Analytics Dashboard")
-
-st.markdown(
-    "Monitor historical sales performance and explore "
-    "future sales predictions using machine learning."
-)
-
 st.markdown("---")
+st.caption(f"Historical data source: {historical_source_label}")
 
 
 # ==========================================
@@ -371,6 +373,7 @@ st.markdown("---")
 # ==========================================
 
 st.subheader("Historical Performance")
+st.caption(f"Historical data source: {historical_source_label}")
 
 total_sales = filtered["Sales"].sum()
 average_sales = filtered["Sales"].mean()
@@ -389,10 +392,8 @@ c4.metric("Days Analysed", f"{total_orders_days:,}")
 # 8. TABS
 # ==========================================
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2 = st.tabs([
     "📊 Historical Analysis",
-    "🔮 Sales Forecast",
-    "📋 Forecast Data",
     "🚀 Upload & Predict"
 ])
 
@@ -502,202 +503,10 @@ with tab1:
 
 
 # ==========================================
-# 10. FORECAST ANALYSIS
-# ==========================================
-
-with tab2:
-
-    st.subheader(f"Sales Forecast - Next {forecast_days} Days")
-
-    # Combined historical and forecast chart
-    st.markdown("### Historical vs Predicted Sales")
-    comparison_fig = go.Figure()
-
-    comparison_fig.add_trace(go.Scatter(
-        x=filtered["Date"],
-        y=filtered["Sales"],
-        mode="lines",
-        name="Historical Sales",
-        line=dict(width=3),
-        hovertemplate="Date: %{x|%d %b %Y}<br>Actual Sales: ₹%{y:,.0f}<extra></extra>"
-    ))
-
-    comparison_fig.add_trace(go.Scatter(
-        x=forecast_filtered["Date"],
-        y=forecast_filtered["Forecasted_Sales"],
-        mode="lines+markers",
-        name="Predicted Sales",
-        line=dict(width=3, dash="dash"),
-        marker=dict(size=6),
-        hovertemplate="Date: %{x|%d %b %Y}<br>Predicted Sales: ₹%{y:,.0f}<extra></extra>"
-    ))
-
-    comparison_fig.update_layout(
-        title="Actual Sales and Future Sales Forecast",
-        template="plotly_dark",
-        paper_bgcolor="#0E1117",
-        plot_bgcolor="#171B26",
-        font_color="white",
-        xaxis_title="Date",
-        yaxis_title="Sales (₹)",
-        hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        height=500
-    )
-
-    st.plotly_chart(comparison_fig, use_container_width=True)
-
-    predicted_total = forecast_filtered[
-        "Forecasted_Sales"
-    ].sum()
-
-    predicted_average = forecast_filtered[
-        "Forecasted_Sales"
-    ].mean()
-
-    highest_predicted = forecast_filtered[
-        "Forecasted_Sales"
-    ].max()
-
-    lowest_predicted = forecast_filtered[
-        "Forecasted_Sales"
-    ].min()
-
-    best_day = forecast_filtered.loc[
-        forecast_filtered["Forecasted_Sales"].idxmax(),
-        "Date"
-    ]
-
-    f1, f2, f3, f4 = st.columns(4)
-
-    f1.metric(
-        "Predicted Revenue",
-        f"₹{predicted_total:,.0f}"
-    )
-
-    f2.metric(
-        "Average Predicted Sales",
-        f"₹{predicted_average:,.0f}"
-    )
-
-    f3.metric(
-        "Highest Predicted Sales",
-        f"₹{highest_predicted:,.0f}"
-    )
-
-    f4.metric(
-        "Lowest Predicted Sales",
-        f"₹{lowest_predicted:,.0f}"
-    )
-
-    st.caption(
-        f"Highest predicted sales day: {best_day.strftime('%d %b %Y')}"
-    )
-
-    forecast_fig = go.Figure()
-
-    forecast_fig.add_trace(
-        go.Scatter(
-            x=forecast_filtered["Date"],
-            y=forecast_filtered["Forecasted_Sales"],
-            mode="lines+markers",
-            name="Predicted Sales",
-            line=dict(width=3),
-            marker=dict(size=8)
-        )
-    )
-
-    forecast_fig.update_layout(
-        title="Future Sales Prediction",
-        template="plotly_dark",
-        paper_bgcolor="#0E1117",
-        plot_bgcolor="#171B26",
-        font_color="white",
-        xaxis_title="Forecast Date",
-        yaxis_title="Predicted Sales (₹)",
-        hovermode="x unified"
-    )
-
-    st.plotly_chart(
-        forecast_fig,
-        use_container_width=True
-    )
-
-    # Daily forecast change
-
-    forecast_copy = forecast_filtered.copy()
-
-    forecast_copy["Daily Change (%)"] = (
-        forecast_copy["Forecasted_Sales"].pct_change() * 100
-    )
-
-    st.subheader("Daily Forecast Movement")
-
-    movement_fig = px.bar(
-        forecast_copy,
-        x="Date",
-        y="Daily Change (%)",
-        title="Percentage Change Compared with Previous Forecast Day",
-        template="plotly_dark"
-    )
-
-    st.plotly_chart(
-        movement_fig,
-        use_container_width=True
-    )
-
-
-# ==========================================
-# 11. FORECAST TABLE
-# ==========================================
-
-with tab3:
-
-    st.subheader("Predicted Sales Details")
-
-    display_data = forecast_filtered.copy()
-
-    # Rename columns
-
-    display_data = display_data.rename(columns={
-        "Date": "Forecast Date",
-        "Forecasted_Sales": "Predicted Sales (₹)"
-    })
-
-    display_data["Predicted Sales (₹)"] = (
-        display_data["Predicted Sales (₹)"].round(2)
-    )
-
-    display_data["Forecast Date"] = (
-        display_data["Forecast Date"].dt.strftime("%d %b %Y")
-    )
-
-    # Hide index and display clean column names
-
-    st.dataframe(
-        display_data,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # Download filtered forecast
-
-    csv_data = display_data.to_csv(
-        index=False
-    ).encode("utf-8")
-
-    st.download_button(
-        label="⬇️ Download Selected Forecast",
-        data=csv_data,
-        file_name="selected_retail_sales_forecast.csv",
-        mime="text/csv"
-    )
-
-# ==========================================
 # 12. UPLOAD YOUR OWN DATA & PREDICT
 # ==========================================
 
-with tab4:
+with tab2:
 
     st.header("🚀 Custom Dataset Prediction")
 
@@ -707,12 +516,6 @@ with tab4:
     )
 
     st.subheader("📂 Upload Your Dataset")
-    uploaded_file = st.file_uploader(
-        "Choose a CSV or Excel file",
-        type=["csv", "xlsx"],
-        key="custom_tab_dataset_upload"
-    )
-
     st.info(
         "Your dataset must contain a date column and a numeric column to forecast. "
         "This version supports daily time-series forecasting."
@@ -722,7 +525,9 @@ with tab4:
 
         try:
 
-            # Read uploaded file
+            # Read uploaded file from the beginning (the same file is also
+            # read earlier to populate Historical Analysis).
+            uploaded_file.seek(0)
             if uploaded_file.name.lower().endswith(".csv"):
                 uploaded_data = pd.read_csv(uploaded_file)
             else:
@@ -756,9 +561,13 @@ with tab4:
 
                 date_options = uploaded_data.columns.tolist()
 
+                date_default = next((c for c in date_options if c in date_candidates), date_options[0])
                 date_col = st.selectbox(
                     "Select Date Column",
-                    options=date_options
+                    options=date_options,
+                    index=date_options.index(st.session_state.get("custom_date_column", date_default))
+                    if st.session_state.get("custom_date_column", date_default) in date_options else date_options.index(date_default),
+                    key="custom_date_column"
                 )
 
                 numeric_options = [
@@ -777,9 +586,13 @@ with tab4:
 
                 else:
 
+                    target_default = next((c for c in numeric_options if c != date_col), numeric_options[0])
                     target_col = st.selectbox(
                         "Select Numeric Column to Predict",
-                        options=numeric_options
+                        options=numeric_options,
+                        index=numeric_options.index(st.session_state.get("custom_target_column", target_default))
+                        if st.session_state.get("custom_target_column", target_default) in numeric_options else numeric_options.index(target_default),
+                        key="custom_target_column"
                     )
 
                     aggregation = st.selectbox(
