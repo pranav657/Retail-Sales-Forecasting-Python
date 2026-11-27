@@ -6,13 +6,13 @@ An interactive **Retail Sales Analytics and Forecasting** project built using Py
 
 > Add your screenshots to the `images` folder using the filenames below. GitHub will display them in this section.
 
-### Historical Analysis
+###  📊  Historical Analysis
 ![Historical Analysis Dashboard](images/historical_analysis.png)
 
-### Sales Forecast — Actual vs Predicted
+### 🔮 Sales Forecast — Actual vs Predicted
 ![Sales Forecast Chart](images/sales_forecast.png)
 
-### Custom Dataset — Upload & Predict
+### 📋Custom Dataset — Upload & Predict
 ![Custom Dataset Prediction](images/custom_prediction.png)
 
 ## ✨ Dashboard Features
